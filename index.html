@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gravity Sandbox</title>
+<style>
+/* Layout: full-screen space canvas; controls left, measurements right, camera bottom-left, guided demo bar bottom-centre. */
+:root{
+  color-scheme:dark;
+  --bg:#05070f; --panel:rgba(13,18,36,.78); --line:rgba(150,170,225,.2);
+  --fg:#eaf0fb; --muted:#93a0bf; --accent:#9db2ff;
+  --star:#ffcf6b; --euler:#ff6b6b; --cromer:#ffb454; --rk4:#4fd1ff; --good:#59e08a;
+  --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --num:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--ui);overflow:hidden;user-select:none;-webkit-user-select:none}
+#space{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+.panel{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 10px 40px rgba(0,0,0,.35)}
+#left{top:16px;left:16px;width:264px;display:flex;flex-direction:column;gap:12px}
+#right{top:16px;right:16px;width:366px;display:flex;flex-direction:column;gap:10px}
+#cam{bottom:16px;left:16px;padding:8px;width:264px}
+h1{font-size:21px;line-height:1.1;margin:0;letter-spacing:.01em;font-weight:750;background:linear-gradient(90deg,#fff,#b9c8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--muted);font-size:12px;margin-top:3px}
+.label{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.seg{display:grid;gap:6px}
+.seg.three{grid-template-columns:1fr 1fr 1fr}
+.seg.two{grid-template-columns:1fr 1fr}
+button{font:600 13px var(--ui);color:var(--fg);background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:11px;padding:12px 8px;cursor:pointer;transition:background .12s,border-color .12s,transform .08s,box-shadow .12s}
+button:hover,button.hot{background:rgba(157,178,255,.22);border-color:var(--accent);box-shadow:0 0 0 3px rgba(157,178,255,.18)}
+button:active,button.pressed{transform:scale(.95)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.on{background:rgba(157,178,255,.26);border-color:var(--accent)}
+button[data-m="euler"].on{background:rgba(255,107,107,.22);border-color:var(--euler)}
+button[data-m="cromer"].on{background:rgba(255,180,84,.22);border-color:var(--cromer)}
+button[data-m="rk4"].on{background:rgba(79,209,255,.2);border-color:var(--rk4)}
+button.big{padding:14px 8px;font-size:14px}
+.chip{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:#59627a;flex:none}
+.dot.ok{background:var(--good);box-shadow:0 0 10px var(--good)}
+.dot.wait{background:var(--cromer);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.35}}
+#camview{width:100%;aspect-ratio:4/3;border-radius:10px;background:#0b1020;display:block}
+#camnote{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.35}
+#camnote b{color:var(--fg)}
+#graph{width:100%;height:146px;display:block;border-radius:10px;background:rgba(0,0,0,.28)}
+table{width:100%;border-collapse:collapse;font:12px var(--num);font-variant-numeric:tabular-nums}
+th{font:600 11px var(--ui);letter-spacing:.03em;color:var(--muted);text-align:right;padding:3px 4px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+td{text-align:right;padding:4px 4px;border-bottom:1px solid rgba(150,170,225,.1);white-space:nowrap}
+td .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:baseline}
+.note{font-size:11.5px;color:var(--muted);line-height:1.4}
+.note b{color:var(--fg);font-weight:600}
+.legend{display:flex;gap:12px;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+/* guided demo bar */
+#guide{left:50%;bottom:16px;transform:translateX(-50%);width:min(660px,calc(100vw - 700px));min-width:420px;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px}
+#guide button{width:54px;height:64px;font-size:22px;padding:0;border-radius:14px}
+#gstep{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+#gtitle{font-size:17px;font-weight:700;line-height:1.2;margin:1px 0 3px}
+#gtext{font-size:13px;color:#c9d3ea;line-height:1.4}
+#gdots{display:flex;gap:5px;margin-top:7px}
+#gdots i{width:22px;height:4px;border-radius:2px;background:rgba(150,170,225,.25)}
+#gdots i.on{background:var(--accent)}
+#toast{left:50%;top:18px;transform:translateX(-50%);padding:9px 18px;border-radius:999px;font-weight:650;opacity:0;transition:opacity .25s;pointer-events:none}
+#toast.show{opacity:1}
+#cursor{position:fixed;width:44px;height:44px;margin:-22px 0 0 -22px;border:3px solid #fff;border-radius:50%;pointer-events:none;display:none;z-index:20;box-shadow:0 0 18px rgba(255,255,255,.6),inset 0 0 10px rgba(255,255,255,.25)}
+#cursor::after{content:"";position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:#fff}
+#cursor.off{opacity:.4;border-style:dashed}
+#cursor.pinch{background:rgba(89,224,138,.55);border-color:var(--good);box-shadow:0 0 22px var(--good)}
+@media (max-width:1180px){#right{width:300px}#left,#cam{width:226px}#guide{width:calc(100vw - 580px);min-width:340px}}
+@media (max-height:720px){#cam{display:none}}
+</style>
+</head>
+<body>
+<canvas id="space" aria-label="Gravity simulation"></canvas>
+
+<div class="panel" id="left">
+  <div>
+    <h1>Gravity Sandbox</h1>
+    <div class="sub">Throw planets with your hand. Physics decides the rest.</div>
+  </div>
+  <div class="chip"><span class="dot wait" id="aidot"></span><span id="aistat">Hand tracking: starting…</span></div>
+  <div>
+    <div class="label">Solver for the next planet</div>
+    <div class="seg three" id="methods">
+      <button data-act="method" data-m="euler" id="m-euler">Euler</button>
+      <button data-act="method" data-m="cromer" id="m-cromer">Euler–<br>Cromer</button>
+      <button data-act="method" data-m="rk4" id="m-rk4" class="on">RK4</button>
+    </div>
+  </div>
+  <div>
+    <div class="label">Time step Δt</div>
+    <div class="seg three" id="steps">
+      <button data-act="dt" data-dt="0.002" id="dt-2">2 ms</button>
+      <button data-act="dt" data-dt="0.01" id="dt-10" class="on">10 ms</button>
+      <button data-act="dt" data-dt="0.03" id="dt-30">30 ms</button>
+    </div>
+  </div>
+  <div class="seg two">
+    <button class="big" data-act="compare" id="b-compare">Compare all 3</button>
+    <button class="big" data-act="circle" id="b-circle">Circular orbit</button>
+    <button class="big" data-act="pause" id="b-pause">Pause</button>
+    <button class="big" data-act="clear" id="b-clear">Clear</button>
+  </div>
+  <button data-act="view" id="b-view">View: 3D</button>
+  <div class="note">Keys: <b>← →</b> demo steps · <b>1 2 3</b> solver · <b>C</b> compare · <b>O</b> orbit · <b>Space</b> pause · <b>X</b> clear · <b>V</b> view · <b>F</b> full screen</div>
+</div>
+
+<div class="panel" id="right">
+  <div>
+    <div class="label">Energy drift ΔE / E₀ (%)</div>
+    <canvas id="graph"></canvas>
+    <div class="legend" style="margin-top:6px">
+      <span><i style="background:var(--euler)"></i>Euler</span>
+      <span><i style="background:var(--cromer)"></i>Euler–Cromer</span>
+      <span><i style="background:var(--rk4)"></i>RK4</span>
+    </div>
+  </div>
+  <div class="note">Real gravity conserves energy, so a perfect solver stays on the <b>0 % line</b>. Any drift is error from the numerical method.</div>
+  <div>
+    <div class="label">Planets, measured from the simulation</div>
+    <table>
+      <thead><tr><th>Planet</th><th>ΔE %</th><th>T (s)</th><th>a</th><th>T²/a³ ×10⁶</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="note"><b>The grid</b> is the star's gravity well: the deeper the dip, the stronger the pull. Press <b>V</b> for the true top view.</div>
+  <div class="note"><b>Kepler's 3rd law:</b> T²/a³ should be the same for every orbit. Theory here: <b id="ktheory"></b> ×10⁻⁶.</div>
+</div>
+
+<div class="panel" id="cam">
+  <canvas id="camview" width="320" height="240"></canvas>
+  <div id="camnote"><b>AI hand tracking.</b> A neural network finds 21 points on your hand in every frame. <b>Pinch</b> = grab, <b>open</b> = launch.</div>
+</div>
+
+<div class="panel" id="guide">
+  <button data-act="prev" id="g-prev" aria-label="Previous step">‹</button>
+  <div>
+    <div id="gstep"></div>
+    <div id="gtitle"></div>
+    <div id="gtext"></div>
+    <div id="gdots"></div>
+  </div>
+  <button data-act="next" id="g-next" aria-label="Next step">›</button>
+</div>
+<div class="panel" id="toast"></div>
+<div id="cursor"></div>
+<video id="video" playsinline muted style="display:none"></video>
+
+<script src="vendor/mp_assets.js"></script>
+<script src="vendor/hands.js"></script>
+<script>
+"use strict";
+/* ============ Physics ============ */
+const GM = 8e6;            // gravitational parameter of the star (px^3 / s^2)
+const STAR_R = 26;         // star radius (px): planets inside it have crashed
+const FAR = 2600;          // beyond this a planet has escaped
+const VEL_K = 2.0;         // launch speed (px/s) per px of pull
+const MIN_PULL = 34;       // a pull shorter than this (screen px) does not launch anything
+const METHODS = {
+  euler:  {name:"Euler",        color:"#ff6b6b"},
+  cromer: {name:"Euler–Cromer", color:"#ffb454"},
+  rk4:    {name:"RK4",          color:"#4fd1ff"}
+};
+let method = "rk4", dt = 0.01, paused = false, simT = 0, acc = 0, nextId = 1, clock = 0;
+const bodies = [], sparks = [], rings = [];
+
+// Newton's law of gravitation: acceleration = -GM * r_vec / r^3
+function ax(x, y){ const r2 = x*x + y*y; return -GM * x / (r2 * Math.sqrt(r2)); }
+function ay(x, y){ const r2 = x*x + y*y; return -GM * y / (r2 * Math.sqrt(r2)); }
+function energy(b){ return 0.5*(b.vx*b.vx + b.vy*b.vy) - GM/Math.hypot(b.x, b.y); }
+
+function stepEuler(b, h){            // uses the OLD position and the OLD velocity
+  const axv = ax(b.x, b.y), ayv = ay(b.x, b.y);
+  b.x += b.vx*h; b.y += b.vy*h;
+  b.vx += axv*h; b.vy += ayv*h;
+}
+function stepCromer(b, h){           // update velocity first, then move using the NEW velocity
+  b.vx += ax(b.x, b.y)*h; b.vy += ay(b.x, b.y)*h;
+  b.x += b.vx*h; b.y += b.vy*h;
+}
+function stepRK4(b, h){              // 4th-order Runge–Kutta: four slope samples per step
+  const x=b.x, y=b.y, vx=b.vx, vy=b.vy;
+  const k1vx=ax(x,y), k1vy=ay(x,y), k1x=vx, k1y=vy;
+  const x2=x+0.5*h*k1x, y2=y+0.5*h*k1y;
+  const k2vx=ax(x2,y2), k2vy=ay(x2,y2), k2x=vx+0.5*h*k1vx, k2y=vy+0.5*h*k1vy;
+  const x3=x+0.5*h*k2x, y3=y+0.5*h*k2y;
+  const k3vx=ax(x3,y3), k3vy=ay(x3,y3), k3x=vx+0.5*h*k2vx, k3y=vy+0.5*h*k2vy;
+  const x4=x+h*k3x, y4=y+h*k3y;
+  const k4vx=ax(x4,y4), k4vy=ay(x4,y4), k4x=vx+h*k3vx, k4y=vy+h*k3vy;
+  b.x  += h/6*(k1x + 2*k2x + 2*k3x + k4x);
+  b.y  += h/6*(k1y + 2*k2y + 2*k3y + k4y);
+  b.vx += h/6*(k1vx + 2*k2vx + 2*k3vx + k4vx);
+  b.vy += h/6*(k1vy + 2*k2vy + 2*k3vy + k4vy);
+}
+const STEP = {euler:stepEuler, cromer:stepCromer, rk4:stepRK4};
+
+function launch(x, y, vx, vy, m, label){
+  if (Math.hypot(x, y) < STAR_R + 6) return null;
+  const r0 = Math.hypot(x, y);
+  const b = {id:nextId++, m:m||method, label:label||null, x, y, vx, vy, t:0, trail:[], hist:[], lastHist:-1,
+             ang:Math.atan2(y, x), swept:0, revStart:0, revs:0, rmin:r0, rmax:r0, T:null, a:null, drift:0};
+  b.E0 = energy(b);
+  bodies.push(b);
+  while (bodies.length > 9) bodies.shift();
+  rings.push({x, y, t:0, c:METHODS[b.m].color});
+  return b;
+}
+function stepBody(b, h){
+  STEP[b.m](b, h);
+  b.t += h;
+  const r = Math.hypot(b.x, b.y);
+  if (r < STAR_R){ b.dead = "crash"; return; }
+  if (r > FAR){ b.dead = "escape"; return; }
+  // measure the orbit directly: period T = time for a full 360° sweep, a = (rmin + rmax)/2
+  const ang = Math.atan2(b.y, b.x);
+  let d = ang - b.ang; if (d > Math.PI) d -= 2*Math.PI; else if (d < -Math.PI) d += 2*Math.PI;
+  b.ang = ang; b.swept += d;
+  if (r < b.rmin) b.rmin = r; if (r > b.rmax) b.rmax = r;
+  if (Math.abs(b.swept) >= 2*Math.PI){
+    b.T = b.t - b.revStart; b.a = (b.rmin + b.rmax)/2; b.revs++;
+    b.swept -= Math.sign(b.swept)*2*Math.PI; b.revStart = b.t; b.rmin = b.rmax = r;
+  }
+  b.drift = (energy(b) - b.E0) / Math.abs(b.E0) * 100;
+  const tr = b.trail, n = tr.length;
+  if (!n || Math.abs(tr[n-2]-b.x) + Math.abs(tr[n-1]-b.y) > 3){ tr.push(b.x, b.y); if (tr.length > 1500) tr.splice(0, 2); }
+  if (simT - b.lastHist >= 0.1){ b.hist.push(simT, b.drift); b.lastHist = simT; if (b.hist.length > 800) b.hist.splice(0, 2); }
+}
+function stepAll(){
+  simT += dt;
+  for (const b of bodies) stepBody(b, dt);
+  for (let i = bodies.length-1; i >= 0; i--){
+    const b = bodies[i];
+    if (b.dead){
+      const c = METHODS[b.m].color;
+      if (b.dead === "crash"){
+        for (let k = 0; k < 26; k++){ const a = Math.random()*7, s = 60 + Math.random()*220; sparks.push({x:b.x, y:b.y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, t:0, c}); }
+        toast("Crashed into the star", c);
+      } else toast("Escaped: faster than escape velocity", c);
+      bodies.splice(i, 1);
+    }
+  }
+}
+
+/* ============ Actions ============ */
+function setMethod(m){ method = m; for (const k in METHODS) document.getElementById("m-"+k).classList.toggle("on", k === m); }
+function setDt(v){ dt = v; document.querySelectorAll("#steps button").forEach(b => b.classList.toggle("on", +b.dataset.dt === v)); }
+function clearAll(){ bodies.length = 0; simT = 0; }
+function compareAll(){
+  // three identical launches, one per method: any difference between them is numerical error
+  clearAll();
+  const r = 210, v = Math.sqrt(GM/r)*0.86;
+  launch(r, 0, 0, -v, "euler"); launch(r, 0, 0, -v, "cromer"); launch(r, 0, 0, -v, "rk4");
+}
+function circularAt(r, th, m, label){
+  const v = Math.sqrt(GM/r);
+  return launch(r*Math.cos(th), r*Math.sin(th), v*Math.sin(th), -v*Math.cos(th), m, label);
+}
+function circular(){ circularAt(120 + Math.random()*200, Math.random()*2*Math.PI); toast("Circular orbit: v = √(GM/r)"); }
+function speedDemo(){
+  clearAll();
+  const r = 200, vc = Math.sqrt(GM/r);
+  for (const q of [0.45, 1, 1.15, 1.45]) launch(r, 0, 0, -vc*q, "rk4", q.toFixed(2) + "× v");
+}
+function keplerDemo(){
+  clearAll();
+  circularAt(110, 0.3, "rk4", "small"); circularAt(190, 2.4, "rk4", "medium");
+  const r = 300, v = Math.sqrt(GM/r)*0.85; launch(-r, 0, 0, v, "rk4", "ellipse");
+}
+function togglePause(){ paused = !paused; document.getElementById("b-pause").textContent = paused ? "Resume" : "Pause"; }
+
+/* ============ Guided demo (the story you tell while presenting) ============ */
+const STEPS = [
+  {t:"Throw a planet", d:"Pinch to grab a point in space, pull to set the speed and direction, then open your fingers. The dotted line is the path that physics predicts.", run(){ clearAll(); circularAt(250, 1, "rk4", "sample planet"); }},
+  {t:"The perfect orbit", d:"A planet moving sideways at exactly v = √(GM/r) keeps falling around the star without ever getting closer. That is a circular orbit.", run(){ clearAll(); circularAt(210, 0, "rk4", "v = √(GM/r)"); }},
+  {t:"Too slow, just right, too fast", d:"Same starting point, four speeds. Too slow crashes, the right speed circles, a bit faster makes an ellipse, and above √2 × orbital speed it escapes for ever.", run: speedDemo},
+  {t:"Three ways to solve the same motion", d:"One launch, solved by Euler (red), Euler–Cromer (orange) and RK4 (blue). Only the maths differs. Red spirals outward and its energy line climbs.", run: compareAll},
+  {t:"Bigger time step, bigger error", d:"With Δt = 30 ms every step is a rougher guess. Euler falls apart quickly, Euler–Cromer wobbles, RK4 still stays on the 0 % line.", run(){ setDt(0.03); compareAll(); }},
+  {t:"Kepler's third law", d:"Three different orbits. The table measures each period T and size a from the motion itself. T²/a³ comes out the same for all three.", run: keplerDemo}
+];
+let stepI = 0;
+function goStep(i){
+  stepI = (i + STEPS.length) % STEPS.length;
+  const s = STEPS[stepI];
+  if (paused) togglePause();
+  setDt(0.01); setMethod("rk4"); aim = null;
+  s.run();
+  document.getElementById("gstep").textContent = `Demo step ${stepI+1} of ${STEPS.length}`;
+  document.getElementById("gtitle").textContent = s.t;
+  document.getElementById("gtext").textContent = s.d;
+  document.getElementById("gdots").innerHTML = STEPS.map((_, k) => `<i class="${k === stepI ? "on" : ""}"></i>`).join("");
+}
+function act(el){
+  const a = el.dataset.act;
+  if (a === "method") setMethod(el.dataset.m);
+  else if (a === "dt") setDt(+el.dataset.dt);
+  else if (a === "compare"){ compareAll(); toast("Same launch, three solvers"); }
+  else if (a === "circle") circular();
+  else if (a === "pause") togglePause();
+  else if (a === "clear") clearAll();
+  else if (a === "view") toggleView();
+  else if (a === "prev") goStep(stepI - 1);
+  else if (a === "next") goStep(stepI + 1);
+}
+document.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => act(b)));
+addEventListener("keydown", e => {
+  const k = e.key;
+  if (k === "ArrowRight") goStep(stepI + 1); else if (k === "ArrowLeft") goStep(stepI - 1);
+  else if (k === "1") setMethod("euler"); else if (k === "2") setMethod("cromer"); else if (k === "3") setMethod("rk4");
+  else if (k === "c" || k === "C") compareAll(); else if (k === "o" || k === "O") circular();
+  else if (k === "v" || k === "V") toggleView();
+  else if (k === "x" || k === "X") clearAll(); else if (k === " "){ e.preventDefault(); togglePause(); }
+  else if (k === "f" || k === "F"){ const d = document; if (d.fullscreenElement) d.exitFullscreen(); else if (d.documentElement.requestFullscreen) d.documentElement.requestFullscreen().catch(()=>{}); }
+});
+let toastTimer = 0;
+function toast(msg, color){
+  const t = document.getElementById("toast"); t.textContent = msg; t.style.color = color || "var(--fg)";
+  t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+/* ============ Aiming (shared by hand and mouse) ============ */
+const cv = document.getElementById("space"), g = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1, S = 1, S0 = 1, CX = 0, CY = 0, starsBg = null;
+let aim = null;         // {x0,y0,x1,y1,src,path:[],ok}
+let lastLaunch = 0;
+/* ---- 3D view: the flat orbital plane seen from a tilted camera, resting on a "rubber sheet" gravity well ---- */
+const TILT_MAX = 0.96, CAM_D = 1500;
+let tilt = TILT_MAX, tiltTarget = TILT_MAX, SN = Math.sin(tilt), CS = Math.cos(tilt);
+function wellZ(r){ return -190/Math.sqrt(1 + (r/95)*(r/95)) * (tilt/TILT_MAX); }      // height of the sheet at distance r (deepest at the star)
+function proj(x, y, z){ const f = CAM_D/(CAM_D - y*SN - z*CS); return [x*f, (y*CS - z*SN)*f, f]; }
+function onSheet(x, y, lift){ return proj(x, y, wellZ(Math.hypot(x, y)) + (lift || 0)); }
+function toWorld(px, py){                                                                 // screen point -> point on the sheet
+  const u = (px - CX)/S, v = (py - CY)/S; let x = u, y = v, z = 0;
+  for (let i = 0; i < 6; i++){
+    const A = CAM_D - z*CS; y = (v*A + z*SN*CAM_D)/(CS*CAM_D + v*SN);
+    x = u*(A - y*SN)/CAM_D; z = wellZ(Math.hypot(x, y));
+  }
+  return [x, y];
+}
+function toggleView(){ tiltTarget = tiltTarget > 0.01 ? 0 : TILT_MAX; document.getElementById("b-view").textContent = tiltTarget > 0.01 ? "View: 3D" : "View: top"; }
+function startAim(px, py, src){
+  if (performance.now() - lastLaunch < (src === "hand" ? 600 : 350)) return;
+  const [x, y] = toWorld(px, py);
+  if (Math.hypot(x, y) < STAR_R + 10) return;
+  aim = {x0:x, y0:y, x1:x, y1:y, src, path:[], ok:false};
+}
+function updateAim(px, py){
+  if (!aim) return;
+  [aim.x1, aim.y1] = toWorld(px, py);
+  aim.ok = Math.hypot(aim.x1-aim.x0, aim.y1-aim.y0)*S >= MIN_PULL;
+  const path = [];
+  if (aim.ok){
+    // dotted preview of the path this launch would take (RK4, 7 s ahead)
+    const p = {x:aim.x0, y:aim.y0, vx:(aim.x1-aim.x0)*VEL_K, vy:(aim.y1-aim.y0)*VEL_K};
+    for (let i = 0; i < 700; i++){
+      stepRK4(p, 0.01);
+      const r = Math.hypot(p.x, p.y);
+      if (r < STAR_R || r > FAR) break;
+      if (i % 4 === 0) path.push(p.x, p.y);
+    }
+  }
+  aim.path = path;
+}
+function endAim(){
+  if (!aim) return;
+  if (aim.ok){ launch(aim.x0, aim.y0, (aim.x1-aim.x0)*VEL_K, (aim.y1-aim.y0)*VEL_K); lastLaunch = performance.now(); }
+  aim = null;
+}
+cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); startAim(e.clientX, e.clientY, "mouse"); });
+cv.addEventListener("pointermove", e => { if (aim && aim.src === "mouse") updateAim(e.clientX, e.clientY); });
+cv.addEventListener("pointerup",   e => { if (aim && aim.src === "mouse") endAim(); });
+cv.addEventListener("pointercancel", () => { if (aim && aim.src === "mouse") aim = null; });
+
+/* ============ Drawing ============ */
+const FONT = "-apple-system,Segoe UI,Helvetica,Arial,sans-serif";
+function resize(){
+  DPR = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR; CX = W/2; CY = H*0.43; S0 = Math.min(W/1500, H/880); S = S0*(1 + 0.32*tilt/TILT_MAX);
+  starsBg = document.createElement("canvas"); starsBg.width = cv.width; starsBg.height = cv.height;
+  const s = starsBg.getContext("2d"), w = cv.width, h = cv.height;
+  s.fillStyle = "#05070f"; s.fillRect(0, 0, w, h);
+  for (const [fx, fy, fr, col] of [[.18,.25,.55,"rgba(90,70,190,.20)"],[.85,.7,.6,"rgba(20,120,150,.16)"],[.6,.1,.4,"rgba(170,60,120,.10)"]]){
+    const n = s.createRadialGradient(fx*w, fy*h, 0, fx*w, fy*h, fr*Math.max(w, h));
+    n.addColorStop(0, col); n.addColorStop(1, "rgba(0,0,0,0)"); s.fillStyle = n; s.fillRect(0, 0, w, h);
+  }
+  let seed = 11; const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 520; i++){
+    const a = 0.12 + rnd()*0.65, r = (0.35 + rnd()*rnd()*1.6)*DPR;
+    s.fillStyle = `rgba(${195+rnd()*60|0},${205+rnd()*50|0},255,${a})`;
+    s.beginPath(); s.arc(rnd()*w, rnd()*h, r, 0, 7); s.fill();
+  }
+  const gc = document.getElementById("graph"); gc.width = gc.clientWidth*DPR; gc.height = gc.clientHeight*DPR;
+}
+addEventListener("resize", resize);
+
+const labelSpots = [];
+function poly(pts){ g.beginPath(); for (let i = 0; i < pts.length; i++){ if (i) g.lineTo(pts[i][0], pts[i][1]); else g.moveTo(pts[i][0], pts[i][1]); } }
+function ringPts(r, n){ const out = []; for (let k = 0; k <= n; k++){ const t = k/n*2*Math.PI; out.push(onSheet(r*Math.cos(t), r*Math.sin(t))); } return out; }
+function drawPlanet(b){
+  const c = METHODS[b.m].color, p = onSheet(b.x, b.y, 9), R = 8.5*p[2];
+  if (!(p[2] > 0.05 && p[2] < 6)) return;                             // far off-screen or behind the camera: skip
+  const sh = onSheet(b.x, b.y, 0);                                    // soft shadow on the sheet
+  g.fillStyle = "rgba(0,0,0,.35)"; g.beginPath(); g.ellipse(sh[0], sh[1], R*1.1, R*1.1*Math.max(.25, CS), 0, 0, 7); g.fill();
+  const halo = g.createRadialGradient(p[0], p[1], 2, p[0], p[1], R*2.9);
+  halo.addColorStop(0, c); halo.addColorStop(1, "rgba(0,0,0,0)");
+  g.globalAlpha = 0.45; g.fillStyle = halo; g.beginPath(); g.arc(p[0], p[1], R*2.9, 0, 7); g.fill(); g.globalAlpha = 1;
+  const ball = g.createRadialGradient(p[0]-R*.35, p[1]-R*.4, 1, p[0], p[1], R);
+  ball.addColorStop(0, "#fff"); ball.addColorStop(.35, c); ball.addColorStop(1, "rgba(0,0,0,.6)");
+  g.fillStyle = c; g.beginPath(); g.arc(p[0], p[1], R, 0, 7); g.fill();
+  g.fillStyle = ball; g.beginPath(); g.arc(p[0], p[1], R, 0, 7); g.fill();
+  const tag = (b.label || METHODS[b.m].name) + (b.revs ? `  ·  ${b.revs} orbit${b.revs > 1 ? "s" : ""}` : "");
+  g.font = `600 12px ${FONT}`; g.textAlign = "left"; g.lineWidth = 4; g.strokeStyle = "rgba(5,7,15,.85)"; g.fillStyle = "rgba(234,240,251,.9)";
+  let lx = p[0] + R + 6, ly = p[1] - R - 3;
+  for (let k = 0; k < labelSpots.length; k++){ const q = labelSpots[k]; if (Math.abs(q[0]-lx) < 130 && Math.abs(q[1]-ly) < 14){ ly = q[1] - 15; k = -1; } }
+  labelSpots.push([lx, ly]);
+  g.strokeText(tag, lx, ly); g.fillText(tag, lx, ly);
+}
+function draw(fdt){
+  clock += fdt;
+  if (tilt !== tiltTarget){ tilt += (tiltTarget - tilt)*Math.min(1, fdt*5); if (Math.abs(tilt - tiltTarget) < 0.003) tilt = tiltTarget; SN = Math.sin(tilt); CS = Math.cos(tilt); S = S0*(1 + 0.32*tilt/TILT_MAX); }
+  labelSpots.length = 0;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = "source-over"; g.drawImage(starsBg, 0, 0);
+  g.setTransform(DPR*S, 0, 0, DPR*S, CX*DPR, CY*DPR);
+  // the gravity well: a grid stretched downward by the star
+  g.lineWidth = 1;
+  for (let r = 30; r <= 600; r += (r < 150 ? 20 : 40)){ g.strokeStyle = `rgba(130,155,255,${(0.10 + 0.34*(1 - r/640)).toFixed(3)})`; poly(ringPts(r, 72)); g.stroke(); }
+  g.strokeStyle = "rgba(130,155,255,.16)";
+  for (let k = 0; k < 24; k++){ const t = k/24*2*Math.PI, pts = []; for (let r = 30; r <= 600; r += 15) pts.push(onSheet(r*Math.cos(t), r*Math.sin(t))); poly(pts); g.stroke(); }
+  // glowing trails
+  g.lineCap = "round"; g.lineJoin = "round"; g.globalCompositeOperation = "lighter";
+  for (const b of bodies){
+    const tr = b.trail, n = tr.length/2; if (n < 2) continue;
+    g.strokeStyle = METHODS[b.m].color;
+    const P = new Array(n); for (let i = 0; i < n; i++) P[i] = onSheet(tr[i*2], tr[i*2+1], 3);
+    const CH = 12;
+    for (let c = 0; c < CH; c++){
+      const i0 = Math.floor(n*c/CH), i1 = Math.min(n-1, Math.floor(n*(c+1)/CH));
+      if (i1 <= i0) continue;
+      const f = (c+1)/CH;
+      g.beginPath(); g.moveTo(P[i0][0], P[i0][1]);
+      for (let i = i0+1; i <= i1; i++) g.lineTo(P[i][0], P[i][1]);
+      g.globalAlpha = 0.10*f; g.lineWidth = 7; g.stroke();
+      g.globalAlpha = 0.06 + 0.7*f; g.lineWidth = 2.2; g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+  g.globalCompositeOperation = "source-over";
+  // planets behind the star, then the star, then planets in front
+  for (const b of bodies) if (b.y < 0) drawPlanet(b);
+  const sp = onSheet(0, 0, STAR_R*0.9*(tilt/TILT_MAX)), SR = STAR_R*sp[2], pulse = 1 + 0.06*Math.sin(clock*1.7);
+  const glow = g.createRadialGradient(sp[0], sp[1], SR*0.4, sp[0], sp[1], SR*5*pulse);
+  glow.addColorStop(0, "rgba(255,207,107,.6)"); glow.addColorStop(.35, "rgba(255,150,60,.16)"); glow.addColorStop(1, "rgba(255,150,60,0)");
+  g.fillStyle = glow; g.beginPath(); g.arc(sp[0], sp[1], SR*5*pulse, 0, 7); g.fill();
+  const core = g.createRadialGradient(sp[0]-SR*.3, sp[1]-SR*.3, 2, sp[0], sp[1], SR);
+  core.addColorStop(0, "#fffbe8"); core.addColorStop(.6, "#ffd36e"); core.addColorStop(1, "#ff9d2e");
+  g.fillStyle = core; g.beginPath(); g.arc(sp[0], sp[1], SR, 0, 7); g.fill();
+  for (const b of bodies) if (b.y >= 0) drawPlanet(b);
+  // launch rings and crash sparks
+  for (let i = rings.length-1; i >= 0; i--){
+    const f = rings[i]; f.t += fdt; const p = onSheet(f.x, f.y, 9);
+    g.strokeStyle = f.c; g.globalAlpha = Math.max(0, 1 - f.t/0.5); g.lineWidth = 2.5;
+    g.beginPath(); g.arc(p[0], p[1], 8 + f.t*90, 0, 7); g.stroke(); g.globalAlpha = 1;
+    if (f.t > 0.5) rings.splice(i, 1);
+  }
+  for (let i = sparks.length-1; i >= 0; i--){
+    const q = sparks[i]; q.t += fdt; q.x += q.vx*fdt; q.y += q.vy*fdt; const p = onSheet(q.x, q.y, 12);
+    g.fillStyle = q.c; g.globalAlpha = Math.max(0, 1 - q.t/0.7); g.beginPath(); g.arc(p[0], p[1], 2.4, 0, 7); g.fill(); g.globalAlpha = 1;
+    if (q.t > 0.7) sparks.splice(i, 1);
+  }
+  if (aim) drawAim();
+}
+function drawAim(){
+  const c = METHODS[method].color, r0 = Math.hypot(aim.x0, aim.y0);
+  const p0 = onSheet(aim.x0, aim.y0, 9), p1 = onSheet(aim.x1, aim.y1, 9);
+  // where a circular orbit from this point would run
+  g.setLineDash([2, 10]); g.strokeStyle = "rgba(89,224,138,.5)"; g.lineWidth = 1.5; poly(ringPts(r0, 90)); g.stroke();
+  // predicted path
+  g.setLineDash([3, 9]); g.strokeStyle = "rgba(255,255,255,.85)"; g.lineWidth = 2.3;
+  const pts = []; for (let i = 0; i < aim.path.length; i += 2) pts.push(onSheet(aim.path[i], aim.path[i+1], 3));
+  if (pts.length){ poly(pts); g.stroke(); }
+  g.setLineDash([]);
+  // pull arrow
+  g.globalAlpha = aim.ok ? 1 : 0.45;
+  g.strokeStyle = c; g.lineWidth = 3.5; g.beginPath(); g.moveTo(p0[0], p0[1]); g.lineTo(p1[0], p1[1]); g.stroke();
+  const an = Math.atan2(p1[1]-p0[1], p1[0]-p0[0]);
+  g.fillStyle = c; g.beginPath(); g.moveTo(p1[0], p1[1]);
+  g.lineTo(p1[0]-16*Math.cos(an-0.4), p1[1]-16*Math.sin(an-0.4)); g.lineTo(p1[0]-16*Math.cos(an+0.4), p1[1]-16*Math.sin(an+0.4)); g.fill();
+  g.globalAlpha = 1;
+  g.fillStyle = c; g.beginPath(); g.arc(p0[0], p0[1], 9, 0, 7); g.fill();
+  g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.arc(p0[0], p0[1], 9, 0, 7); g.stroke();
+  // read-out card: speed as a multiple of orbital speed, on a gauge
+  const q = Math.hypot(aim.x1-aim.x0, aim.y1-aim.y0)*VEL_K / Math.sqrt(GM/r0);
+  const bx = p0[0] + 22, by = p0[1] - 78, bw = 214, bh = 62;
+  g.fillStyle = "rgba(10,14,30,.88)"; g.strokeStyle = "rgba(150,170,225,.35)"; g.lineWidth = 1;
+  g.beginPath(); g.roundRect ? g.roundRect(bx, by, bw, bh, 10) : g.rect(bx, by, bw, bh); g.fill(); g.stroke();
+  g.textAlign = "left";
+  if (!aim.ok){
+    g.font = `600 14px ${FONT}`; g.fillStyle = "#fff"; g.fillText("Pull further to launch", bx+12, by+26);
+    g.font = `12.5px ${FONT}`; g.fillStyle = "rgba(234,240,251,.7)"; g.fillText("Let go now to cancel", bx+12, by+46);
+    return;
+  }
+  const verdict = q >= Math.SQRT2 ? "will escape" : q > 1.06 ? "ellipse, swings outward" : q >= 0.94 ? "close to a circle" : "ellipse, dips inward";
+  g.font = `700 15px ${FONT}`; g.fillStyle = "#fff"; g.fillText(`${q.toFixed(2)} × orbital speed`, bx+12, by+22);
+  g.font = `12.5px ${FONT}`; g.fillStyle = "rgba(234,240,251,.75)"; g.fillText(verdict, bx+12, by+39);
+  const gx = bx+12, gy = by+47, gw = bw-24, QM = 1.9, X = v => gx + Math.min(v, QM)/QM*gw;
+  for (const [a, b2, col] of [[0, .94, "#ff6b6b"], [.94, 1.06, "#59e08a"], [1.06, Math.SQRT2, "#ffb454"], [Math.SQRT2, QM, "#8c98b5"]]){ g.fillStyle = col; g.fillRect(X(a), gy, X(b2)-X(a)-1, 5); }
+  g.fillStyle = "#fff"; g.beginPath(); g.moveTo(X(q), gy-2); g.lineTo(X(q)-5, gy+11); g.lineTo(X(q)+5, gy+11); g.fill();
+}
+
+function drawGraph(){
+  const gc = document.getElementById("graph"), c = gc.getContext("2d"), w = gc.width, h = gc.height;
+  c.clearRect(0, 0, w, h);
+  const span = 40, t1 = Math.max(simT, span), t0 = t1 - span;
+  let m = 0.5;
+  for (const b of bodies) for (let i = 1; i < b.hist.length; i += 2) if (b.hist[i-1] >= t0) m = Math.max(m, Math.abs(b.hist[i]));
+  m = Math.min(m*1.15, 400);
+  const padL = 44*DPR, padR = 8*DPR, padT = 8*DPR, padB = 18*DPR;
+  const X = t => padL + (t - t0)/span*(w - padL - padR), Y = v => padT + (1 - (v + m)/(2*m))*(h - padT - padB);
+  c.font = `${11*DPR}px ui-monospace,Menlo,monospace`; c.fillStyle = "#93a0bf"; c.textAlign = "right"; c.textBaseline = "middle";
+  c.strokeStyle = "rgba(150,170,225,.14)"; c.lineWidth = 1;
+  for (const v of [m, m/2, 0, -m/2, -m]){
+    c.beginPath(); c.moveTo(padL, Y(v)); c.lineTo(w - padR, Y(v)); c.stroke();
+    c.fillText((v > 0 ? "+" : "") + (Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1)), padL - 6*DPR, Y(v));
+  }
+  c.strokeStyle = "rgba(255,255,255,.5)"; c.beginPath(); c.moveTo(padL, Y(0)); c.lineTo(w - padR, Y(0)); c.stroke();
+  c.textAlign = "center"; c.textBaseline = "alphabetic";
+  c.fillText("last 40 s of simulated time", (padL + w - padR)/2, h - 4*DPR);
+  c.lineWidth = 2*DPR; c.lineJoin = "round";
+  for (const b of bodies){
+    c.strokeStyle = METHODS[b.m].color; c.beginPath(); let on = false;
+    for (let i = 0; i < b.hist.length; i += 2){
+      if (b.hist[i] < t0) continue;
+      const px = X(b.hist[i]), py = Y(Math.max(-m, Math.min(m, b.hist[i+1])));
+      if (on) c.lineTo(px, py); else { c.moveTo(px, py); on = true; }
+    }
+    c.stroke();
+  }
+}
+let lastRows = 0;
+function drawRows(now){
+  if (now - lastRows < 250) return; lastRows = now;
+  const fmt = (v, d) => v == null ? "–" : v.toFixed(d);
+  let html = "";
+  for (const b of bodies){
+    const k = b.T && b.a ? b.T*b.T/(b.a*b.a*b.a)*1e6 : null;
+    const d = Math.abs(b.drift) < 0.0005 ? "0.000" : (b.drift > 0 ? "+" : "") + (Math.abs(b.drift) >= 100 ? b.drift.toFixed(0) : b.drift.toFixed(3));
+    html += `<tr><td><span class="sw" style="background:${METHODS[b.m].color}"></span>${b.label || METHODS[b.m].name}</td><td>${d}</td><td>${fmt(b.T, 2)}</td><td>${fmt(b.a, 0)}</td><td>${fmt(k, 2)}</td></tr>`;
+  }
+  document.getElementById("rows").innerHTML = html || `<tr><td colspan="5" style="text-align:center;color:var(--muted);font-family:var(--ui)">No planets yet. Throw one.</td></tr>`;
+}
+
+/* ============ Main loop ============ */
+let lastFrame = performance.now();
+function frame(now){
+  const fdt = Math.min((now - lastFrame)/1000, 0.05); lastFrame = now;
+  if (!paused){
+    acc += fdt; let guard = 0;
+    while (acc >= dt && guard++ < 400){ stepAll(); acc -= dt; }
+  }
+  if (aim && aim.src === "hand" && hand.pinch) updateAim(hand.x, hand.y);   // aim only follows a firm pinch
+  try { draw(fdt); drawGraph(); drawRows(now); } catch (err) { console.warn(err); }   // one bad frame must never stop the app
+  requestAnimationFrame(frame);
+}
+
+/* ============ AI hand tracking (MediaPipe Hands neural network) ============ */
+const video = document.getElementById("video"), camCv = document.getElementById("camview"), cc = camCv.getContext("2d");
+const cursorEl = document.getElementById("cursor");
+const hand = {present:false, pinch:false, firm:false, x:0, y:0, lastSeen:0, hot:null, ratio:1, closeN:0, openN:0, armed:false, openT:0, closeT:0, cx:0, cy:0, v:0, px:0, py:0, pt:0, badT:0, stat:""};
+const HOLD_MS = 120, STILL_PX = 60, ARM_MS = 150, FAST = 1500;   // pinch must be held still this long; a release faster than FAST px/s is a hand being dropped
+const PINCH_ON = 0.24, PINCH_OFF = 0.46;     // thumb–index gap as a fraction of palm length
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function setStatus(text, state){
+  document.getElementById("aistat").textContent = text;
+  document.getElementById("aidot").className = "dot" + (state ? " " + state : "");
+}
+function handleLandmarks(lm, aspect){
+  const now = performance.now();
+  if (!lm){
+    if (hand.present && now - hand.lastSeen > 400){
+      hand.present = false; hand.pinch = false; hand.firm = false; hand.closeN = hand.openN = 0; hand.armed = false; hand.openT = hand.closeT = 0; hand.pt = 0; hand.stat = ""; hand.trail = []; cursorEl.style.display = "none";
+      if (aim && aim.src === "hand") aim = null;            // hand left the picture: cancel, never launch
+      if (hand.hot){ hand.hot.classList.remove("hot"); hand.hot = null; }
+      setStatus("Hand tracking: show your hand to the camera", "wait");
+    }
+    return;
+  }
+  hand.lastSeen = now;
+  const th = lm[4], ix = lm[8], A = aspect || 4/3;
+  const d = (p, q) => Math.hypot((p.x - q.x)*A, p.y - q.y);
+  // pointer = midpoint of thumb tip and index tip, mirrored; the middle 76 % of the camera frame maps to the whole screen
+  // pointer = knuckles of the index and middle fingers: it does not shift when the fingers pinch or open, so the aim stays where you put it
+  const mx = 1 - (lm[5].x + lm[9].x)/2, my = (lm[5].y + lm[9].y)/2 - 0.10;
+  const tx = Math.max(0, Math.min(1, (mx - 0.12)/0.76))*W, ty = Math.max(0, Math.min(1, (my - 0.12)/0.76))*H;
+  const ox = hand.x, oy = hand.y;
+  if (!hand.present){ hand.x = tx; hand.y = ty; }
+  else { const a = Math.max(0.16, Math.min(0.75, 0.16 + Math.hypot(tx - hand.x, ty - hand.y)/200)); hand.x += (tx - hand.x)*a; hand.y += (ty - hand.y)*a; }   // steady when slow (precise aim), quick when moving far
+  // pinch strength = thumb–index gap relative to palm length, smoothed over frames
+  const palm = Math.max(1e-6, d(lm[0], lm[9]));
+  const raw = d(th, ix)/palm;
+  hand.ratio = hand.present ? hand.ratio + (raw - hand.ratio)*0.55 : raw;
+  hand.present = true;
+  const fist = d(ix, lm[0]) < d(lm[5], lm[0])*1.02;          // index finger curled into the palm: a fist, not a pinch
+  // how fast the hand is moving on screen (px/s), smoothed
+  if (hand.pt){ const v = Math.hypot(hand.x - ox, hand.y - oy)/Math.max(0.01, (now - hand.pt)/1000); hand.v += (v - hand.v)*0.5; } else hand.v = 0;
+  hand.px = tx; hand.py = ty; hand.pt = now;
+  (hand.trail || (hand.trail = [])).push([now, hand.x, hand.y]); while (hand.trail.length && now - hand.trail[0][0] > 300) hand.trail.shift();
+  if (hand.v > FAST || Math.hypot(hand.x - hand.trail[0][1], hand.y - hand.trail[0][2]) > 260) hand.fastT = now;   // moved a long way in the last 0.3 s: the hand is being dropped or swiped
+  // is this a hand held up on purpose? palm facing the camera, fully inside the picture, other fingers open (an "OK" shape)
+  const inside = [th, ix].every(q => q.x > 0.02 && q.x < 0.98 && q.y > 0.02 && q.y < 0.98);
+  const facing = d(lm[5], lm[17])/palm > 0.42;
+  const openFingers = [[12,10],[16,14],[20,18]].filter(([t, k]) => d(lm[t], lm[0]) > d(lm[k], lm[0])*1.25).length >= 2;
+  const good = inside && facing;
+  const was = hand.pinch;
+  if (!was){
+    // arm: the hand must first be seen open and calm for a moment (so a hand that enters or leaves half-closed does nothing)
+    if (!hand.armed){
+      if (good && hand.ratio > 0.5 && hand.v < 1000){ if (!hand.openT) hand.openT = now; if (now - hand.openT >= ARM_MS) hand.armed = true; } else hand.openT = 0;
+    }
+    // pinch: fingers closed AND held still for HOLD_MS, with the other fingers open
+    if (hand.armed && good && openFingers && !fist && hand.ratio < PINCH_ON){
+      if (!hand.closeT || Math.hypot(hand.x - hand.cx, hand.y - hand.cy) > STILL_PX){ hand.closeT = now; hand.cx = hand.x; hand.cy = hand.y; }
+      if (now - hand.closeT >= HOLD_MS){ hand.pinch = true; hand.openN = 0; hand.badT = 0; }
+    } else hand.closeT = 0;
+  } else {
+    if (hand.ratio > PINCH_OFF){ if (++hand.openN >= 3){ hand.pinch = false; hand.closeT = 0; } } else hand.openN = 0;
+    // hand turned away or sliding out of the picture while pinched: cancel, never launch
+    if (!good){ if (!hand.badT) hand.badT = now; if (now - hand.badT > 200){ hand.pinch = false; hand.armed = false; hand.openT = hand.closeT = 0; if (aim && aim.src === "hand") aim = null; } } else hand.badT = 0;
+  }
+  const stat = hand.pinch ? "Hand tracking: holding" : hand.armed ? "Hand tracking: ready. Pinch \u{1F44C} and hold still to grab" : "Hand tracking: open your hand to get ready";
+  if (stat !== hand.stat){ hand.stat = stat; setStatus(stat, hand.armed ? "ok" : "wait"); }
+  hand.firm = hand.pinch && hand.ratio < 0.34;
+  // cursor ring closes as the fingers close, so you can see a pinch coming
+  const size = hand.pinch ? 22 : Math.round(26 + Math.max(0, Math.min(1, (hand.ratio - PINCH_ON)/0.7))*30);
+  cursorEl.style.display = "block"; cursorEl.style.left = hand.x + "px"; cursorEl.style.top = hand.y + "px";
+  cursorEl.style.width = cursorEl.style.height = size + "px"; cursorEl.style.margin = (-size/2) + "px 0 0 " + (-size/2) + "px";
+  cursorEl.classList.toggle("pinch", hand.pinch); cursorEl.classList.toggle("off", !hand.armed && !hand.pinch);
+  const el = document.elementFromPoint(hand.x, hand.y), btn = el && el.closest ? el.closest("[data-act]") : null;
+  if (btn !== hand.hot){ if (hand.hot) hand.hot.classList.remove("hot"); hand.hot = btn; if (btn) btn.classList.add("hot"); }
+  if (hand.pinch && !was){
+    if (btn){ btn.classList.add("pressed"); setTimeout(() => btn.classList.remove("pressed"), 160); act(btn); }
+    else if (el === cv) startAim(hand.x, hand.y, "hand");
+  } else if (!hand.pinch && was){
+    if (aim && aim.src === "hand"){ if (now - (hand.fastT || 0) < 250) aim = null; else endAim(); }   // let go while the hand is still: launch. Hand being dropped or swiped away: cancel
+    hand.armed = false; hand.openT = 0;                    // must show an open, calm hand again before the next grab
+  }
+}
+function drawCam(lm){
+  const w = camCv.width, h = camCv.height;
+  cc.save(); cc.translate(w, 0); cc.scale(-1, 1);
+  if (video.readyState >= 2) cc.drawImage(video, 0, 0, w, h); else { cc.fillStyle = "#0b1020"; cc.fillRect(0, 0, w, h); }
+  if (lm){
+    cc.strokeStyle = "#4fd1ff"; cc.lineWidth = 2.5; cc.beginPath();
+    for (const [a, b] of BONES){ cc.moveTo(lm[a].x*w, lm[a].y*h); cc.lineTo(lm[b].x*w, lm[b].y*h); } cc.stroke();
+    for (let i = 0; i < 21; i++){ cc.fillStyle = (i === 4 || i === 8) ? (hand.pinch ? "#59e08a" : "#ffcf6b") : "#fff"; cc.beginPath(); cc.arc(lm[i].x*w, lm[i].y*h, (i === 4 || i === 8) ? 5.5 : 3, 0, 7); cc.fill(); }
+  }
+  cc.restore();
+  if (lm){
+    cc.fillStyle = "rgba(5,7,15,.7)"; cc.fillRect(6, 6, 96, 24);
+    cc.fillStyle = hand.pinch ? "#59e08a" : "#fff"; cc.font = `700 13px ${FONT}`; cc.fillText(hand.pinch ? "PINCH" : "open hand", 13, 23);
+  }
+}
+const blobUrls = {};
+function locate(file){
+  // model + script files are embedded (vendor/mp_assets.js) so the page works when opened straight from disk
+  const b64 = window.__MP_B64 && window.__MP_B64[file];
+  if (!b64) return "vendor/" + file;
+  if (!blobUrls[file]){
+    const bin = atob(b64), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    blobUrls[file] = URL.createObjectURL(new Blob([u8], {type: file.endsWith(".wasm") ? "application/wasm" : file.endsWith(".js") ? "text/javascript" : "application/octet-stream"}));
+  }
+  return blobUrls[file];
+}
+let tracker = null, busy = false, frames = 0;
+async function startTracking(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof Hands === "undefined"){ setStatus("Mouse mode (no camera here)", ""); drawCam(null); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640}, height:{ideal:480}, facingMode:"user"}, audio:false});
+    video.srcObject = stream; await video.play();
+  } catch (e){ setStatus("Mouse mode (camera blocked: allow it and reload)", ""); drawCam(null); return; }
+  setStatus("Hand tracking: loading the AI model…", "wait");
+  try {
+    tracker = new Hands({locateFile: locate});
+    tracker.setOptions({maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.65, minTrackingConfidence:0.6});
+    tracker.onResults(res => {
+      frames++;
+      const lm = res.multiHandLandmarks && res.multiHandLandmarks[0] ? res.multiHandLandmarks[0] : null;
+      if (frames === 1 && !lm) setStatus("Hand tracking: show your hand to the camera", "wait");
+      handleLandmarks(lm, video.videoWidth/video.videoHeight);
+      drawCam(lm);
+    });
+    await tracker.initialize();
+  } catch (e){ console.error(e); setStatus("Mouse mode (hand tracker failed to load)", ""); tracker = null; drawCam(null); return; }
+  const pump = async () => {
+    if (tracker && !busy && video.readyState >= 2){ busy = true; try { await tracker.send({image: video}); } catch (e){ console.error(e); } busy = false; }
+    requestAnimationFrame(pump);
+  };
+  pump();
+}
+
+/* ============ Start ============ */
+document.getElementById("ktheory").textContent = (4*Math.PI*Math.PI/GM*1e6).toFixed(2);
+resize(); goStep(0); requestAnimationFrame(frame);
+if (location.hash === "#notrack"){ setStatus("Mouse mode", ""); drawCam(null); } else startTracking();
+window.__lab = {toWorld, onSheet, toggleView, bodies, launch, handleLandmarks, hand, energy, METHODS, GM, goStep, get aim(){ return aim; }, get simT(){ return simT; }, get frames(){ return frames; }, get stepI(){ return stepI; }};
+</script>
+</body>
+</html>
